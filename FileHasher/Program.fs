@@ -11,10 +11,12 @@ open System.Security.Cryptography
 module CmdParse =
     type SigTypeOption = MD5 | SHA1 | SHA256
     type RecursiveOption = Recursive | NonRecursive
+    type TimeOption = Time | NoTime
 
     type CmdLineOptions = {
         sigtype: SigTypeOption list;
-        recurs: RecursiveOption
+        recurs: RecursiveOption;
+        time: TimeOption
     }
 
     let printCmdLineHelp() =
@@ -23,8 +25,9 @@ module CmdParse =
         printfn "**************************************"
         printfn "Command Line Options:"
         printfn "-r: Hash files in subdirectories as well as current directory"
-        printfn "-h: Display this information"
+        printfn "-t: Display times"
         printfn "-a: Hash files using all algorithms"
+        printfn "-h: Display this information"
         printfn ""
         printfn "Signature Type Options (can declare any or all or none)"
         printfn "-md5: Hash files using the MD5 algorithm"
@@ -36,7 +39,8 @@ module CmdParse =
         // Start with default arguments
         let defaultOptions = {
             sigtype = [MD5];
-            recurs = NonRecursive
+            recurs = NonRecursive;
+            time = NoTime
         }
 
         // Inner function is the recursive function used to loop over the array of arguments
@@ -49,6 +53,10 @@ module CmdParse =
             // Match on the recursion flag - allows hashing of subdirectories
             | "-r" :: xs | "/r" :: xs -> 
                 let newOptionsSoFar = { optionsSoFar with recurs = Recursive }
+                parseCmdLineRec xs newOptionsSoFar
+
+            | "-t" :: xs | "/t" :: xs ->
+                let newOptionsSoFar = { optionsSoFar with time = Time }
                 parseCmdLineRec xs newOptionsSoFar
 
             // Add MD5 to the list of signature types (duplicates in the list won't matter - we're only checking if it exists)
@@ -85,19 +93,70 @@ module CmdParse =
         parseCmdLineRec args defaultOptions
 
 
+
+type HashRecord = {
+    md5: string;
+    md5time: float;
+    sha1: string;
+    sha1time: float;
+    sha256: string;
+    sha256time: float;
+    file: string;
+}
+
 // Mess of code
 #nowarn40
 let hashMsgAgent = MailboxProcessor.Start( fun data ->
     // Message processing function
     let rec messageLoop = async {
         // Read in the data
-        let! record, time = data.Receive()
+        let! (record, timeop) = data.Receive()
 
         // Print the received data
-//        printfn "\nFilename:\n%s" name
-//        printfn "Type: %s" sigType
-//        printfn "Signature: %s" hash
-//        printfn "Time: %f" time
+        printfn "\nFile name: %s" record.file
+        match record.md5 with
+        | null ->
+            None |> ignore
+        | _ -> 
+            printfn "MD5: %s" record.md5
+
+        match (timeop, record.md5time) with
+        | (CmdParse.NoTime, _) ->
+            None |> ignore
+        | (CmdParse.Time, 0.0) ->
+            None |> ignore
+        | (CmdParse.Time, _) ->
+            printfn "MD5 Time Elapsed: %f" record.md5time
+
+        match record.sha1 with
+        | null ->
+            None |> ignore
+        | _ -> 
+            printfn "SHA1: %s" record.sha1
+
+        match (timeop, record.sha1time) with
+        | (CmdParse.NoTime, _) ->
+            None |> ignore
+        | (CmdParse.Time, 0.0) ->
+            None |> ignore
+        | (CmdParse.Time, _) ->
+            printfn "SHA1 Time Elapsed: %f" record.sha1time
+
+        match record.sha256 with
+        | null ->
+            None |> ignore
+        | _ -> 
+            printfn "SHA256: %s" record.sha256
+
+        match (timeop, record.sha256time) with
+        | (CmdParse.NoTime, _) ->
+            None |> ignore
+        | (CmdParse.Time, 0.0) ->
+            None |> ignore
+        | (CmdParse.Time, _) ->
+            printfn "SHA256 Time Elapsed: %f" record.sha256time
+
+
 
         return! messageLoop
     }
@@ -126,12 +185,7 @@ let getDirectoryContents path =
     }
 
 
-type HashRecord = {
-    md5: string;
-    sha1: string;
-    sha256: string;
-    file: string
-}
+
 
 let md5Hash(input : FileStream) =
     //let timer = new Stopwatch()
@@ -173,38 +227,41 @@ let resetStream(stream : FileStream) =
 
 
 // Returns a record of hashes { md5: md5hash; sha1: sha1hash; sha256: sha256hash }
-let hashFile (input : FileStream) (options : CmdParse.SigTypeOption list) =
+let hashFile (input : FileStream) (sigOptions : CmdParse.SigTypeOption list) =
     let drec = {
-        md5 = "";
-        sha1 = "";
-        sha256 = "";
-        file = input.Name
+        md5 = null;
+        md5time = 0.0;
+        sha1 = null;
+        sha1time = 0.0;
+        sha256 = null;
+        sha256time = 0.0;
+        file = input.Name;
     }
 
-    let rec hashFileRec (input : FileStream) options hrecSoFar =
-        match options with
+    let rec hashFileRec (input : FileStream) sigOptions hrecSoFar =
+        match sigOptions with
         | [] ->
             hrecSoFar
 
         | CmdParse.MD5 :: xs ->
-            let newhrec = { hrecSoFar with md5 = md5Hash input }
+            let timer = new Stopwatch()
+            timer.Start()
+            let newhrec = { hrecSoFar with md5 = md5Hash input; md5time = timer.Elapsed.TotalMilliseconds }
             hashFileRec (resetStream input) xs newhrec
 
         | CmdParse.SHA1 :: xs ->
-            let newhrec = { hrecSoFar with sha1 = sha1Hash input }
+            let timer = new Stopwatch()
+            timer.Start()
+            let newhrec = { hrecSoFar with sha1 = sha1Hash input; sha1time = timer.Elapsed.TotalMilliseconds }
             hashFileRec (resetStream input) xs newhrec
 
         | CmdParse.SHA256 :: xs ->
-            let newhrec = { hrecSoFar with sha256 = sha256Hash input }
+            let timer = new Stopwatch()
+            timer.Start()
+            let newhrec = { hrecSoFar with sha256 = sha256Hash input; sha256time = timer.Elapsed.TotalMilliseconds }
             hashFileRec (resetStream input) xs newhrec
 
-    hashFileRec input options drec
-
-
-let displayHashResults record time =
-    // Add in the time and send it to the mailbox processor
-    hashMsgAgent.Post (record, time)
-
+    hashFileRec input sigOptions drec
 
 
 let createFileStream fileName =
@@ -213,18 +270,6 @@ let createFileStream fileName =
 
 
 let hashDirectory path (options : CmdParse.CmdLineOptions) =
-//    try
-//        Seq.toArray(getDirectoryDecendants path)
-//        |> Array.Parallel.map createFileStream
-//        |> match sigType with
-//            | "md5" -> Array.Parallel.map md5Hash
-//            | "sha1" -> Array.Parallel.map sha1Hash
-//            | "sha256" -> Array.Parallel.map sha256Hash
-//        |> ignore
-//    with
-//        | :? ArgumentException -> invalidArg "sigType" (sprintf "%s is not a valid signature type" sigType)
-    
-    // Get file paths
     let fp = match options.recurs with
                 | CmdParse.Recursive ->
                     Seq.toArray (getDirectoryContentsRec path)    
@@ -235,7 +280,7 @@ let hashDirectory path (options : CmdParse.CmdLineOptions) =
     fp 
     |> Array.Parallel.map createFileStream
     |> Array.Parallel.map ( fun x -> hashFile x options.sigtype )
-    |> ignore
+    |> Array.Parallel.map ( fun x -> hashMsgAgent.Post (x, options.time) )
 
 
 
@@ -251,29 +296,22 @@ let main argv =
     let path = Environment.CurrentDirectory
     //printfn "%s" path
 
-
-
+    // Main event function
+    hashDirectory path options |> ignore
 
     // Console 'loop'
-//    printfn "Press 'q' to exit"
-//
-//    let action = fun _ ->
-//        Console.Write "\nEnter Input: "
-//        Console.ReadLine()
-//
-//    let readlines = Seq.initInfinite( fun _ -> action() )
-//
-//    let run item = 
-//        match item with
-//        | "q" -> Some item
-//        | "md5" -> time( fun() -> hashDirectory path "md5" )
-//                   //hashDirectory path "md5"
-//                   None
-//        | "sha1" -> time( fun() -> hashDirectory path "sha1" )
-//                    None
-//        | "sha256" -> time( fun() -> hashDirectory path "sha256" )
-//                      None
-//        | _ -> None
-//
-//    Seq.pick run readlines |> ignore
+    printfn "Press 'q' to exit"
+
+    let action = fun _ ->
+        Console.Write "\nEnter Input: "
+        Console.ReadLine()
+
+    let readlines = Seq.initInfinite( fun _ -> action() )
+
+    let run item = 
+        match item with
+        | "q" -> Some item
+        | _ -> None
+
+    Seq.pick run readlines |> ignore
     0 // return an integer exit code
