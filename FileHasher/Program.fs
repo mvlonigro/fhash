@@ -102,6 +102,7 @@ type HashRecord = {
     sha256: string;
     sha256time: float;
     file: string;
+    size: string;
 }
 
 // Mess of code
@@ -114,6 +115,7 @@ let hashMsgAgent = MailboxProcessor.Start( fun data ->
 
         // Print the received data
         printfn "\nFile name: %s" record.file
+        printfn "File size: %s" record.size
         match record.md5 with
         | null ->
             None |> ignore
@@ -157,11 +159,58 @@ let hashMsgAgent = MailboxProcessor.Start( fun data ->
             printfn "SHA256 Time Elapsed: %f" record.sha256time
 
 
-
         return! messageLoop
     }
     messageLoop
 )
+
+let hashMsg record timeop = 
+    // Print the received data
+    printfn "\nFile name: %s" record.file
+    printfn "File size: %s" record.size
+    match record.md5 with
+    | null ->
+        None |> ignore
+    | _ -> 
+        printfn "MD5: %s" record.md5
+
+    match (timeop, record.md5time) with
+    | (CmdParse.NoTime, _) ->
+        None |> ignore
+    | (CmdParse.Time, 0.0) ->
+        None |> ignore
+    | (CmdParse.Time, _) ->
+        printfn "MD5 Time Elapsed: %f" record.md5time
+
+    match record.sha1 with
+    | null ->
+        None |> ignore
+    | _ -> 
+        printfn "SHA1: %s" record.sha1
+
+    match (timeop, record.sha1time) with
+    | (CmdParse.NoTime, _) ->
+        None |> ignore
+    | (CmdParse.Time, 0.0) ->
+        None |> ignore
+    | (CmdParse.Time, _) ->
+        printfn "SHA1 Time Elapsed: %f" record.sha1time
+
+    match record.sha256 with
+    | null ->
+        None |> ignore
+    | _ -> 
+        printfn "SHA256: %s" record.sha256
+
+    match (timeop, record.sha256time) with
+    | (CmdParse.NoTime, _) ->
+        None |> ignore
+    | (CmdParse.Time, 0.0) ->
+        None |> ignore
+    | (CmdParse.Time, _) ->
+        printfn "SHA256 Time Elapsed: %f" record.sha256time
+
+
 
 let time f =
     let timer = new Stopwatch()
@@ -228,6 +277,7 @@ let resetStream(stream : FileStream) =
 
 // Returns a record of hashes { md5: md5hash; sha1: sha1hash; sha256: sha256hash }
 let hashFile (input : FileStream) (sigOptions : CmdParse.SigTypeOption list) =
+    let filesize = input.Length
     let drec = {
         md5 = null;
         md5time = 0.0;
@@ -236,6 +286,7 @@ let hashFile (input : FileStream) (sigOptions : CmdParse.SigTypeOption list) =
         sha256 = null;
         sha256time = 0.0;
         file = input.Name;
+        size = (filesize / (int64)1000).ToString() + " KB (" + filesize.ToString() + " bytes)" ;
     }
 
     let rec hashFileRec (input : FileStream) sigOptions hrecSoFar =
@@ -278,15 +329,20 @@ let hashDirectory path (options : CmdParse.CmdLineOptions) =
                     Seq.toArray (getDirectoryContents path)
 
     fp 
-    |> Array.Parallel.map createFileStream
-    |> Array.Parallel.map ( fun x -> hashFile x options.sigtype )
-    |> Array.Parallel.map ( fun x -> hashMsgAgent.Post (x, options.time) )
+    |> Array.Parallel.map createFileStream //parallel
+    //|> Array.map createFileStream //sequential
+    |> Array.Parallel.map ( fun x -> hashFile x options.sigtype ) //parallel
+    //|> Array.map ( fun x -> hashFile x options.sigtype ) //sequential
+    //|> Array.Parallel.map ( fun x -> hashMsgAgent.Post (x, options.time) ) //parallel
+    |> Array.map ( fun x -> hashMsg x options.time ) //sequential
 
 
 
 [<EntryPoint>]
 let main argv = 
 
+    let timer = new Stopwatch()
+    timer.Start()
     // Parse the user's command line options
     let argvList = Array.toList argv
     let options = CmdParse.parseCmdLine argvList
@@ -300,18 +356,22 @@ let main argv =
     hashDirectory path options |> ignore
 
     // Console 'loop'
-    printfn "Press 'q' to exit"
+//    printfn "Press 'q' to exit"
+//
+//    let action = fun _ ->
+//        Console.Write "\nEnter Input: "
+//        Console.ReadLine()
+//
+//    let readlines = Seq.initInfinite( fun _ -> action() )
+//
+//    let run item = 
+//        match item with
+//        | "q" -> Some item
+//        | _ -> None
+//
+//    Seq.pick run readlines |> ignore
 
-    let action = fun _ ->
-        Console.Write "\nEnter Input: "
-        Console.ReadLine()
-
-    let readlines = Seq.initInfinite( fun _ -> action() )
-
-    let run item = 
-        match item with
-        | "q" -> Some item
-        | _ -> None
-
-    Seq.pick run readlines |> ignore
+    // Print the total program execution time
+    printfn "\nTotal Execution Time: %f" timer.Elapsed.TotalMilliseconds
+    
     0 // return an integer exit code
