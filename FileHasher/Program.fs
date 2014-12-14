@@ -24,6 +24,14 @@ module CommonLibrary =
         |> Seq.map ( fun c -> c.ToString("X2") )
         |> Seq.reduce(+)
 
+    let convertHexStrToBytes (hexstr:string) =
+        hexstr
+        |> Seq.windowed 2
+        |> Seq.mapi ( fun i j -> (i,j) )
+        |> Seq.filter ( fun (i,j) -> i % 2 = 0 )
+        |> Seq.map ( fun (_,j) -> Byte.Parse(new String(j), Globalization.NumberStyles.AllowHexSpecifier) )
+        |> Seq.toArray
+
 //=======================
 // Command line parsing
 //=======================
@@ -32,12 +40,15 @@ module CmdParse =
     type RecursiveOption = Recursive | NonRecursive
     type TimeOption = Time | NoTime
     type RunModeOption = RunModeDefault | RunMode1 | RunMode2 | RunMode3
+    type SeedOption = WithSeed | WithoutSeed
 
     type CmdLineOptions = {
         sigtype: SigTypeOption list;
         recurs: RecursiveOption;
         time: TimeOption;
-        mode: RunModeOption
+        mode: RunModeOption;
+        seedop: SeedOption;
+        seed: string
     }
 
     let printCmdLineHelp() =
@@ -62,7 +73,9 @@ module CmdParse =
             sigtype = [MD5];
             recurs = NonRecursive;
             time = NoTime;
-            mode = RunModeDefault
+            mode = RunModeDefault;
+            seedop = WithoutSeed;
+            seed = null
         }
 
         // Inner function is the recursive function used to loop over the array of arguments
@@ -100,6 +113,18 @@ module CmdParse =
                 let newOptionsSoFar = { optionsSoFar with sigtype = [MD5; SHA1; SHA256] }
                 parseCmdLineRec xs newOptionsSoFar
 
+            | "-s" :: xs | "/s" :: xs ->
+                // Take the next item as the seed, then continue the loop with the next, next item
+                match xs with
+                | x :: xss ->
+                    let newOptionsSoFar = { optionsSoFar with seedop = WithSeed; seed = x }
+                    parseCmdLineRec xss newOptionsSoFar
+                | [] ->
+                    eprintfn "A seed must be provided if using the -s option."
+                    // Exit the program
+                    Environment.Exit(1)
+                    optionsSoFar //<-- added just to satisfy the compiler, program should exit before this
+
             | "-1" :: xs | "/1" :: xs ->
                 let newOptionsSoFar = { optionsSoFar with mode = RunMode1 }
                 parseCmdLineRec xs newOptionsSoFar
@@ -116,7 +141,7 @@ module CmdParse =
             | "-h" :: xs | "/h" :: xs ->
                 // Including optionsSoFar at the end to satisfy the compiler, even though 'printCmdLineHelp' exits the application
                 printCmdLineHelp()
-                optionsSoFar
+                optionsSoFar //<-- added just to satisfy the compiler, program should exit before this
 
             // Handle any other values by printing to STDERR and continuing
             | x :: xs ->
@@ -257,6 +282,7 @@ module ConsoleDisplay =
 // File Reader
 //================================
 module FileReader =
+    open CommonLibrary
     open CmdParse
 
     let rec getDirectoryContentsRec path =
@@ -285,10 +311,19 @@ module FileReader =
         stream.Seek((int64)0, SeekOrigin.Begin) |> ignore
         stream
 
-    let createFileStream fileName =
-        // Using 128Kb buffer size. Note: .NET default is 4Kb buffer size (4096)
-        new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read, 131072, true)
+    let createFileStream fileName options =
+        match options.seedop with
+        | WithoutSeed ->
+            // Using 128Kb buffer size. Note: .NET default is 4Kb buffer size (4096)
+            new FileStream (fileName, FileMode.Open, FileAccess.Read, FileShare.Read, 131072, true)
 
+        | WithSeed ->
+            // Open file
+            let fs = new FileStream (fileName, FileMode.Append, FileAccess.Write, FileShare.Read, 131072, true)
+            let bytes = convertHexStrToBytes options.seed
+            // Append seed bytes
+            fs.Write( bytes, 0, bytes.Length )
+            resetStream fs
 
 //=========================
 // Hasher
@@ -365,8 +400,8 @@ module Hasher =
     let hashDirectory path (options : CmdParse.CmdLineOptions) =
         let fp = Seq.toArray (getFilesInPath path options.recurs)
         fp 
-        |> Array.Parallel.map createFileStream
-        |> Array.Parallel.map ( fun x -> hashFile x options.sigtype )
+        |> Array.Parallel.map ( fun x -> createFileStream x options )
+        |> Array.Parallel.map ( fun x -> hashFile x options )
         //|> Array.Parallel.map ( fun x -> hashMsgAgent.Post (x, options.time) ) //parallel
         |> Array.map ( fun x -> hashMsg x options.time )
 
@@ -374,24 +409,24 @@ module Hasher =
     //  Sequential file read, Parallel hash, Sequential display
     let hashDirectory1 path (options : CmdLineOptions) =
         Seq.toArray (getFilesInPath path options.recurs)
-        |> Array.map createFileStream
-        |> Array.Parallel.map ( fun x -> hashFile x options.sigtype )
+        |> Array.map ( fun x -> createFileStream x options )
+        |> Array.Parallel.map ( fun x -> hashFile x options )
         |> Array.map ( fun x -> hashMsg x options.time )
 
     // Alternate option 2
     //  Parallel file read, Sequential hash, Sequential display
     let hashDirectory2 path (options : CmdLineOptions) =
         Seq.toArray (getFilesInPath path options.recurs)
-        |> Array.Parallel.map createFileStream
-        |> Array.map ( fun x -> hashFile x options.sigtype )
+        |> Array.Parallel.map ( fun x -> createFileStream x options )
+        |> Array.map ( fun x -> hashFile x options )
         |> Array.map ( fun x -> hashMsg x options.time )
 
     // Alternate option 2
     //  Sequential file read, Sequential hash, Sequential display
     let hashDirectory3 path (options : CmdLineOptions) =
         Seq.toArray (getFilesInPath path options.recurs)
-        |> Array.map createFileStream
-        |> Array.map ( fun x -> hashFile x options.sigtype )
+        |> Array.map ( fun x -> createFileStream x options )
+        |> Array.map ( fun x -> hashFile x options )
         |> Array.map ( fun x -> hashMsg x options.time )
 
 module Main =
