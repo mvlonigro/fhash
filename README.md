@@ -1,4 +1,4 @@
-FSharpHash
+FHash
 ==========
 
 A Windows command line program designed to hash all files in the directory that it is run. Can hash files using MD5, SHA1,
