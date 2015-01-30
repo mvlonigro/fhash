@@ -1,16 +1,16 @@
 fhash
 ==========
 
-A Windows command line program designed to hash all files in the directory that it is run. Can hash files using MD5, SHA1,
-and SHA256 algorithms. This program takes advantage of F#'s Array.Parallel to hash files concurrently for a more than 2x
-speedup.
+A .NET library written in F# that is designed to quickly hash all files in a directory.
 
-How To Use
------------
+The Projects
+-------------
 
-Download the files in this repo, then open FileHasher.sln in Visual Studio 2012 or later. Build the program in Visual Studio,
-then run the FileHasher.exe that is created. Run the file in the directory of the files to be hashed.
+Included in this repository are two projects: fhash and fhash-app.
 
-Use FileHasher.exe [-h] to see a list of available command line arguments.
+<b>fhash</b>
+This is an F# project that is the main library to be referenced from a .NET project.
+<b>fhash-app</b>
+This is a C# console application that demos the usage of the fhash library.
 
-A more descriptive README is coming soon!
+A more informative README is coming soon!
