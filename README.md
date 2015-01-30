@@ -10,6 +10,7 @@ Included in this repository are two projects: fhash and fhash-app.
 
 <b>fhash</b>
 This is an F# project that is the main library to be referenced from a .NET project.
+
 <b>fhash-app</b>
 This is a C# console application that demos the usage of the fhash library.
 
